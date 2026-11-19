@@ -1,0 +1,197 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+    "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
+    "https://stac-extensions.github.io/file/v2.1.0/schema.json",
+    "https://stac-extensions.github.io/alternate-assets/v1.1.0/schema.json"
+  ],
+  "id": "gem-15_wm9s41",
+  "collection": "gem-15",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -9.0,
+          41.0
+        ],
+        [
+          -8.0,
+          41.0
+        ],
+        [
+          -8.0,
+          42.0
+        ],
+        [
+          -9.0,
+          42.0
+        ],
+        [
+          -9.0,
+          41.0
+        ]
+      ]
+    ]
+  },
+  "bbox": [
+    -9.0,
+    41.0,
+    -8.0,
+    42.0
+  ],
+  "properties": {
+    "datetime": "2026-09-29T14:17:40Z",
+    "created": "2026-09-29T14:17:40Z",
+    "gsd": 15.0,
+    "gem:cell_id": "wm9s41",
+    "gem:group_id": "p40_m10",
+    "proj:epsg": 32629,
+    "updated": "2026-09-29T09:46:05Z"
+  },
+  "assets": {
+    "dsm": {
+      "href": "https://storage.googleapis.com/climate-and-sustainability/gem-15/p40_m10/wm9s41/dsm/zall/mosaic.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "Digital Surface Model (DSM)",
+      "description": "GEM-15 surface elevation at 15 m, aggregated from native 0.5 m surface elevation: primary DSM, 5th/50th/95th percentiles and standard deviation of native cells within each 15 m pixel.",
+      "roles": [
+        "data"
+      ],
+      "proj:epsg": 32629,
+      "proj:shape": [
+        8192,
+        8192
+      ],
+      "proj:transform": [
+        15.0,
+        0.0,
+        491520.0,
+        0.0,
+        -15.0,
+        4654080.0
+      ],
+      "proj:bbox": [
+        491520.0,
+        4531200.0,
+        614400.0,
+        4654080.0
+      ],
+      "raster:bands": [
+        {
+          "name": "dsm",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "Surface elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        },
+        {
+          "name": "dsm_percentile_5",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "5th percentile of native surface elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        },
+        {
+          "name": "dsm_percentile_50",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "50th percentile of native surface elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        },
+        {
+          "name": "dsm_percentile_95",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "95th percentile of native surface elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        },
+        {
+          "name": "dsm_std",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "Standard deviation of native surface elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        }
+      ],
+      "alternate": {
+        "gs": {
+          "title": "Google Cloud Storage URI",
+          "href": "gs://climate-and-sustainability/gem-15/p40_m10/wm9s41/dsm/zall/mosaic.tif"
+        }
+      },
+      "file:size": 785077759,
+      "created": "2026-09-29T14:17:40Z"
+    },
+    "dtm": {
+      "href": "https://storage.googleapis.com/climate-and-sustainability/gem-15/p40_m10/wm9s41/dtm/zall/mosaic.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "Digital Terrain Model (DTM)",
+      "description": "Bare-earth terrain elevation at 15 m.",
+      "roles": [
+        "data"
+      ],
+      "proj:epsg": 32629,
+      "proj:shape": [
+        8192,
+        8192
+      ],
+      "proj:transform": [
+        15.0,
+        0.0,
+        491520.0,
+        0.0,
+        -15.0,
+        4654080.0
+      ],
+      "proj:bbox": [
+        491520.0,
+        4531200.0,
+        614400.0,
+        4654080.0
+      ],
+      "raster:bands": [
+        {
+          "name": "dtm",
+          "data_type": "float32",
+          "spatial_resolution": 15.0,
+          "description": "Terrain elevation.",
+          "nodata": "nan",
+          "unit": "m"
+        }
+      ],
+      "alternate": {
+        "gs": {
+          "title": "Google Cloud Storage URI",
+          "href": "gs://climate-and-sustainability/gem-15/p40_m10/wm9s41/dtm/zall/mosaic.tif"
+        }
+      },
+      "file:size": 152491961,
+      "created": "2026-09-29T14:17:40Z"
+    }
+  },
+  "links": [
+    {
+      "rel": "root",
+      "href": "../../../catalog.json",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.json",
+      "type": "application/json"
+    },
+    {
+      "rel": "collection",
+      "href": "../../collection.json",
+      "type": "application/json"
+    }
+  ]
+}
