@@ -114,7 +114,9 @@ def clip(urls, dest, dst_wkt, bounds, resolution, cutline_geojson,
                 dstNodata=float('nan'),
                 outputType=gdal.GDT_Float32,
                 cutlineDSName=cutline,
-                multithread=True,
+                # The HTTP options are set for this thread only, and a warp
+                # worker thread would read without them: twice as slow.
+                multithread=False,
                 creationOptions=GTIFF_OPTIONS,
                 callback=_callback(on_progress, is_canceled),
             ),
