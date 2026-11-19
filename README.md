@@ -42,9 +42,9 @@ qgis_process run gem15elevation:download -- EXTENT="-8.62,-8.58,41.13,41.16 [EPS
 
 `PRODUCTS`: 0 DTM, 1 DSM, 2 nDSM; repeat it for more than one. With polygons, pixels outside them are left empty.
 
-Output is in the UTM zone of the area centre unless you set **Output CRS** (`CRS`). In that zone the pixels are Google's own, unchanged. In any other CRS they are reprojected with bilinear resampling. An area that crosses a UTM zone line is reprojected on the side that is not in the output zone.
+Output is a GeoTIFF, in the UTM zone Google uses for the cell at the area centre, unless you set **Output CRS** (`CRS`). That is usually the standard zone; in western Norway, for example, Google uses zone 32. In that zone the pixels are Google's own, unchanged. In any other CRS they are reprojected with bilinear resampling. An area that crosses a UTM zone line is reprojected on the side that is not in the output zone.
 
-The run stops before downloading if the area is larger than "Stop if the area exceeds (km²)" (2500 km² by default). At 15 m, 2500 km² is about 11 million pixels, or 45 MB uncompressed, per product.
+The output covers the bounding box of the area, so the run stops before downloading if that box is larger than "Stop if the bounding box of the area exceeds (km²)" (2500 km² by default). Two polygons far apart, or an area across the 180° meridian, have a very large box; the 180° case is not supported. At 15 m, 2500 km² is about 11 million pixels, or 45 MB uncompressed, per product.
 
 Every output file carries the attribution in its metadata (`ATTRIBUTION`, `LICENSE`, `SOURCE`), so the credit stays with the data. Files written by `qgis_process` carry no style.
 

@@ -6,11 +6,13 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsDistanceArea,
+    QgsFeatureRequest,
     QgsGeometry,
     QgsNetworkAccessManager,
     QgsProcessing,
     QgsProcessingAlgorithm,
     QgsProcessingException,
+    QgsProcessingFeatureSource,
     QgsProcessingParameterCrs,
     QgsProcessingParameterEnum,
     QgsProcessingParameterExtent,
@@ -18,7 +20,6 @@ from qgis.core import (
     QgsProcessingParameterNumber,
     QgsProcessingParameterRasterDestination,
     QgsProcessingUtils,
-    QgsRasterFileWriter,
     QgsRectangle,
     QgsUnitTypes,
 )
@@ -85,9 +86,11 @@ class DownloadElevation(QgsProcessingAlgorithm):
             'comply with Indian geospatial rules. The DTM is less accurate '
             'under dense forest.\n\n'
             'Only the part of each file that covers the area is read, so '
-            'nothing is cached. Output CRS: the UTM zone of the area centre '
-            'unless you set one. In the cells\' own UTM zone the pixels are '
-            'kept as they are; elsewhere they are reprojected (bilinear).\n\n'
+            'nothing is cached. Output: GeoTIFF, in the UTM zone Google uses '
+            'for the cell at the area centre unless you set a CRS. In the '
+            'cells\' own UTM zone the pixels are kept as they are; elsewhere '
+            'they are reprojected (bilinear). The size limit applies to the '
+            'bounding box of the area, which the output covers.\n\n'
             'Data: {}. Licence: {}. Keep this credit when you publish maps '
             'or data made with it. This plugin is not affiliated with '
             'Google.'
@@ -119,14 +122,15 @@ class DownloadElevation(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterCrs(
                 self.CRS,
-                tr('Output CRS (empty: UTM zone of the area centre)'),
+                tr('Output CRS (empty: the UTM zone of the cell at the area '
+                   'centre)'),
                 optional=True,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.MAX_AREA_KM2,
-                tr('Stop if the area exceeds (km²)'),
+                tr('Stop if the bounding box of the area exceeds (km²)'),
                 QgsProcessingParameterNumber.Type.Integer,
                 2500,
                 minValue=1,
@@ -156,12 +160,19 @@ class DownloadElevation(QgsProcessingAlgorithm):
             source.sourceCrs(), WGS84, context.transformContext()
         )
         parts = []
-        for f in source.getFeatures():
+        # Repair instead of letting QGIS stop on an invalid polygon: the
+        # area only needs to say where to clip.
+        for f in source.getFeatures(
+            QgsFeatureRequest(),
+            QgsProcessingFeatureSource.Flag.FlagSkipGeometryValidityChecks,
+        ):
             g = f.geometry()
             if g.isEmpty():
                 continue
+            g = g.makeValid()
             g.transform(transform)
-            parts.append(g)
+            if not g.isEmpty():
+                parts.append(g)
         if not parts:
             raise QgsProcessingException(tr('The area layer has no polygons.'))
         return QgsGeometry.unaryUnion(parts), False
@@ -172,10 +183,13 @@ class DownloadElevation(QgsProcessingAlgorithm):
         reply = QgsNetworkAccessManager.instance().blockingGet(
             request, feedback=feedback
         )
+        if feedback.isCanceled():
+            raise raster.Canceled()
         status = reply.attribute(
             QNetworkRequest.Attribute.HttpStatusCodeAttribute
         )
-        if status in (403, 404):
+        # The bucket answers 404 for a cell it has no file for.
+        if status == 404:
             return None
         if reply.error() != QNetworkReply.NetworkError.NoError:
             raise QgsProcessingException(
@@ -192,13 +206,14 @@ class DownloadElevation(QgsProcessingAlgorithm):
             )
 
     def _cells(self, area, feedback):
+        """(cell, item) for each cell of the area that has data."""
         bbox = area.boundingBox()
         found = []
         for cell in cells.cells_in_bbox(
             bbox.xMinimum(), bbox.yMinimum(), bbox.xMaximum(), bbox.yMaximum()
         ):
             if feedback.isCanceled():
-                return []
+                raise raster.Canceled()
             outline = QgsGeometry.fromRect(QgsRectangle(*cell.bounds))
             if not outline.intersects(area):
                 continue
@@ -209,17 +224,22 @@ class DownloadElevation(QgsProcessingAlgorithm):
                 feedback.pushInfo(
                     tr('Cell {}: EPSG:{}').format(cell.id, item.epsg)
                 )
-                found.append(item)
+                found.append((cell, item))
         return found
 
-    def _target_crs(self, parameters, context, area):
+    def _target_crs(self, parameters, context, area, found):
+        """The CRS asked for, or else the UTM zone Google used for the cell
+        at the area centre, so its pixels are kept as they are."""
         crs = self.parameterAsCrs(parameters, self.CRS, context)
         if crs.isValid():
             return crs
         c = area.centroid().asPoint()
-        return QgsCoordinateReferenceSystem(
-            'EPSG:{}'.format(cells.utm_epsg(c.x(), c.y()))
-        )
+        epsg = cells.utm_epsg(c.x(), c.y())
+        for cell, item in found:
+            lon, lat, east, north = cell.bounds
+            if lon <= c.x() < east and lat <= c.y() < north:
+                epsg = item.epsg
+        return QgsCoordinateReferenceSystem('EPSG:{}'.format(epsg))
 
     def _outputs(self, parameters, context):
         """(product, path) for each chosen product, in PRODUCTS order."""
@@ -234,6 +254,12 @@ class DownloadElevation(QgsProcessingAlgorithm):
                 raise QgsProcessingException(
                     tr('Set the {} output.').format(tr(p.label))
                 )
+            if os.path.splitext(path)[1].lower() not in ('.tif', '.tiff'):
+                raise QgsProcessingException(
+                    tr('Save the {} output as a GeoTIFF (.tif).').format(
+                        tr(p.label)
+                    )
+                )
             outputs.append((p, path))
         return outputs
 
@@ -245,20 +271,27 @@ class DownloadElevation(QgsProcessingAlgorithm):
         measure = QgsDistanceArea()
         measure.setSourceCrs(WGS84, context.transformContext())
         measure.setEllipsoid(WGS84.ellipsoidAcronym())
-        km2 = measure.measureArea(area) / 1e6
-        feedback.pushInfo(tr('Area: {:.1f} km²').format(km2))
+        # The output covers the bounding box of the area, so that is what the
+        # limit applies to. Two far-apart polygons, or an area across the 180
+        # degree meridian, have a huge one.
+        km2 = measure.measureArea(
+            QgsGeometry.fromRect(area.boundingBox())
+        ) / 1e6
+        feedback.pushInfo(tr('Area (bounding box): {:.1f} km²').format(km2))
         if km2 > max_km2:
             raise QgsProcessingException(
                 tr(
-                    'The area is {:.0f} km², over the {} km² limit. Use a '
-                    'smaller area or raise the limit.'
+                    'The bounding box of the area is {:.0f} km², over the {} '
+                    'km² limit. Use a smaller area or raise the limit. Areas '
+                    'across the 180° meridian are not supported.'
                 ).format(km2, max_km2)
             )
 
-        items = self._cells(area, feedback)
-        if feedback.isCanceled():
+        try:
+            found = self._cells(area, feedback)
+        except raster.Canceled:
             return {}
-        if not items:
+        if not found:
             raise QgsProcessingException(
                 tr(
                     'GEM-15 has no data here. It covers 60 S to 84 N, '
@@ -267,7 +300,8 @@ class DownloadElevation(QgsProcessingAlgorithm):
                 )
             )
 
-        crs = self._target_crs(parameters, context, area)
+        items = [item for cell, item in found]
+        crs = self._target_crs(parameters, context, area, found)
         to_target = QgsCoordinateTransform(
             WGS84, crs, context.transformContext()
         )
@@ -296,9 +330,6 @@ class DownloadElevation(QgsProcessingAlgorithm):
 
         for n, key in enumerate(steps):
             path = paths[key]
-            driver = QgsRasterFileWriter.driverForExtension(
-                os.path.splitext(path)[1]
-            ) or 'GTiff'
             base = n * share
             feedback.setProgressText(
                 tr('{} ({} of {})').format(
@@ -312,7 +343,7 @@ class DownloadElevation(QgsProcessingAlgorithm):
             try:
                 if key == 'ndsm':
                     raster.difference(
-                        paths['dsm'], paths['dtm'], path, driver,
+                        paths['dsm'], paths['dtm'], path,
                         on_progress, feedback.isCanceled,
                     )
                 else:
@@ -321,7 +352,7 @@ class DownloadElevation(QgsProcessingAlgorithm):
                         for i in items
                     ]
                     raster.clip(
-                        urls, path, driver, crs.toWkt(), bounds, resolution,
+                        urls, path, crs.toWkt(), bounds, resolution,
                         cutline, on_progress, feedback.isCanceled,
                     )
             except raster.Canceled:
