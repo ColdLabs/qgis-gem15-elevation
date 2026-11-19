@@ -11,7 +11,7 @@ about=Downloads GEM-15, the experimental near-global elevation model from Google
 
     Coverage: 60 S to 84 N, except Russia, China, Mongolia, Greenland and Antarctica. India is offset on purpose by Google. The DTM is less accurate under dense forest.
 
-    Google publishes one Cloud-Optimized GeoTIFF per 1-degree cell. The plugin reads only the part each file needs for the area, so a town takes seconds and nothing is cached. Output is a GeoTIFF per product, in the UTM zone of the area unless you choose a CRS. Loaded layers get a hillshade (DTM, DSM) or height colours (nDSM). No extra Python packages are needed.
+    Google publishes one Cloud-Optimized GeoTIFF per 1-degree cell. The plugin reads only the part each file needs for the area, so a town takes seconds and nothing is cached. Output is a GeoTIFF per product, in the UTM zone of the area unless you choose a CRS. Loaded layers are coloured by elevation (DTM, DSM) or by height above ground (nDSM, see-through under 2 m). No extra Python packages are needed.
 
     Data licence: GEM-15 is published by Google under CC-BY 4.0 and requires the attribution "This dataset is produced by Google". The plugin writes it into every output file. This plugin is not affiliated with Google.
 
@@ -25,4 +25,4 @@ tags=elevation,dem,dtm,dsm,ndsm,terrain,height,gem-15,google,download,processing
 changelog=0.1.0
     - First release: DTM, DSM and nDSM for the map extent or a polygon layer, at 15 m
     - Output in the UTM zone of the area or a CRS you choose; attribution written into each file
-    - Hillshade for DTM and DSM, height colours for nDSM
+    - Elevation colours for DTM and DSM, height colours for nDSM

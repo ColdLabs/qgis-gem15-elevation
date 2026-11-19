@@ -1,6 +1,6 @@
 from qgis.core import (
+    QgsBilinearRasterResampler,
     QgsColorRampShader,
-    QgsHillshadeRenderer,
     QgsProcessingLayerPostProcessorInterface,
     QgsRasterShader,
     QgsSingleBandPseudoColorRenderer,
@@ -9,12 +9,12 @@ from qgis.PyQt.QtGui import QColor
 
 ATTRIBUTION = 'This dataset is produced by Google'
 
-# Height above ground in metres. Under 1 m is see-through, so bare ground
-# shows the map below; then viridis, light for low and dark for tall, like
-# the height colours of the sibling building plugins.
+# Height above ground in metres. Under 2 m is see-through, so bare ground,
+# streets and noise show the map below; then viridis, light for low and dark
+# for tall, like the height colours of the sibling building plugins.
 NDSM_STOPS = [
-    (0, (253, 231, 37, 0), '0 m'),
-    (1, (253, 231, 37, 255), '1 m'),
+    (2, (253, 231, 37, 0), '2 m'),
+    (3, (253, 231, 37, 255), '3 m'),
     (6, (94, 201, 98, 255), '6 m'),
     (12, (33, 145, 140, 255), '12 m'),
     (25, (59, 82, 139, 255), '25 m'),
@@ -22,27 +22,55 @@ NDSM_STOPS = [
 ]
 
 
-def ndsm_renderer(provider):
-    ramp = QgsColorRampShader(0, 50)
+# Elevation colours from the lowest to the highest value of the layer, as
+# shares of that range: greens low, browns high.
+ELEVATION_STOPS = [
+    (0.0, (0, 104, 55)),
+    (0.2, (120, 198, 121)),
+    (0.45, (255, 255, 191)),
+    (0.7, (216, 162, 91)),
+    (1.0, (107, 61, 10)),
+]
+
+
+def _renderer(provider, stops):
+    """stops: (value, (r, g, b[, a]), label), lowest first."""
+    ramp = QgsColorRampShader(stops[0][0], stops[-1][0])
     ramp.setColorRampType(QgsColorRampShader.Type.Interpolated)
     ramp.setColorRampItemList(
         [
             QgsColorRampShader.ColorRampItem(value, QColor(*rgba), label)
-            for value, rgba, label in NDSM_STOPS
+            for value, rgba, label in stops
         ]
     )
     shader = QgsRasterShader()
     shader.setRasterShaderFunction(ramp)
     renderer = QgsSingleBandPseudoColorRenderer(provider, 1, shader)
-    renderer.setClassificationMin(0)
-    renderer.setClassificationMax(50)
+    renderer.setClassificationMin(stops[0][0])
+    renderer.setClassificationMax(stops[-1][0])
     return renderer
 
 
-def hillshade_renderer(provider):
-    renderer = QgsHillshadeRenderer(provider, 1, 315, 45)
-    renderer.setMultiDirectional(True)
-    return renderer
+def ndsm_renderer(provider):
+    return _renderer(provider, NDSM_STOPS)
+
+
+def elevation_renderer(provider):
+    stats = provider.bandStatistics(1)
+    low, high = stats.minimumValue, stats.maximumValue
+    if not low < high:
+        low, high = 0.0, 100.0
+    return _renderer(
+        provider,
+        [
+            (
+                low + share * (high - low),
+                rgb,
+                '{:.0f} m'.format(low + share * (high - low)),
+            )
+            for share, rgb in ELEVATION_STOPS
+        ],
+    )
 
 
 class ProductStyle(QgsProcessingLayerPostProcessorInterface):
@@ -55,7 +83,10 @@ class ProductStyle(QgsProcessingLayerPostProcessorInterface):
         if self.key == 'ndsm':
             layer.setRenderer(ndsm_renderer(provider))
         else:
-            layer.setRenderer(hillshade_renderer(provider))
+            layer.setRenderer(elevation_renderer(provider))
+        layer.resampleFilter().setZoomedInResampler(
+            QgsBilinearRasterResampler()
+        )
         metadata = layer.metadata()
         metadata.setRights([ATTRIBUTION])
         metadata.setLicenses(['CC-BY 4.0'])
