@@ -23,15 +23,12 @@ class Canceled(Exception):
     pass
 
 
-def _options(driver):
-    if driver == 'GTiff':
-        return [
-            'COMPRESS=DEFLATE',
-            'PREDICTOR=3',
-            'TILED=YES',
-            'BIGTIFF=IF_SAFER',
-        ]
-    return []
+GTIFF_OPTIONS = [
+    'COMPRESS=DEFLATE',
+    'PREDICTOR=3',
+    'TILED=YES',
+    'BIGTIFF=IF_SAFER',
+]
 
 
 def _callback(on_progress, is_canceled):
@@ -64,13 +61,28 @@ def _restore(previous):
         gdal.SetThreadLocalConfigOption(key, value)
 
 
-def _fail(what, is_canceled):
+def _fail(what, is_canceled, error=None):
+    """GDAL reports a failure by returning None, or by raising RuntimeError
+    when anything in the process has called gdal.UseExceptions()."""
     if is_canceled():
         raise Canceled()
-    raise RasterError('{}: {}'.format(what, gdal.GetLastErrorMsg()))
+    raise RasterError(
+        '{}: {}'.format(what, error or gdal.GetLastErrorMsg())
+    )
 
 
-def clip(urls, dest, driver, dst_wkt, bounds, resolution, cutline_geojson,
+def _band_one(url):
+    """An in-memory VRT of band 1 of a COG. gdal.Warp's srcBands needs
+    GDAL 3.7, and QGIS 3.38 can run on older."""
+    path = '/vsimem/gem15_{}.vrt'.format(uuid.uuid4().hex)
+    vrt = gdal.BuildVRT(path, ['/vsicurl/' + url], bandList=[1])
+    if vrt is None:
+        raise RuntimeError(gdal.GetLastErrorMsg() or url)
+    vrt = None
+    return path
+
+
+def clip(urls, dest, dst_wkt, bounds, resolution, cutline_geojson,
          on_progress, is_canceled):
     """Write band 1 of every COG in urls into one raster on dest's grid.
 
@@ -79,45 +91,49 @@ def clip(urls, dest, driver, dst_wkt, bounds, resolution, cutline_geojson,
     pixels as they are. cutline_geojson, in EPSG:4326, masks out what lies
     outside the polygons."""
     cutline = None
+    sources = []
     if cutline_geojson is not None:
         cutline = '/vsimem/gem15_cutline_{}.geojson'.format(uuid.uuid4().hex)
         gdal.FileFromMemBuffer(cutline, cutline_geojson.encode('utf-8'))
     previous = _set_http_options()
+    gdal.ErrorReset()
     try:
-        gdal.ErrorReset()
+        for url in urls:
+            sources.append(_band_one(url))
         out = gdal.Warp(
             dest,
-            ['/vsicurl/' + url for url in urls],
+            sources,
             options=gdal.WarpOptions(
-                format=driver,
+                format='GTiff',
                 dstSRS=dst_wkt,
                 outputBounds=bounds,
                 xRes=resolution,
                 yRes=resolution,
                 targetAlignedPixels=True,
-                srcBands=[1],
                 resampleAlg='bilinear',
                 dstNodata=float('nan'),
                 outputType=gdal.GDT_Float32,
                 cutlineDSName=cutline,
                 multithread=True,
-                creationOptions=_options(driver),
+                creationOptions=GTIFF_OPTIONS,
                 callback=_callback(on_progress, is_canceled),
             ),
         )
-        if out is None:
-            _fail('Cannot clip GEM-15', is_canceled)
-        out = None
+    except RuntimeError as e:
+        _fail('Cannot clip GEM-15', is_canceled, e)
     finally:
         _restore(previous)
-        if cutline is not None:
-            gdal.Unlink(cutline)
+        for path in sources + ([cutline] if cutline else []):
+            gdal.Unlink(path)
+    if out is None:
+        _fail('Cannot clip GEM-15', is_canceled)
+    out = None
 
 
-def difference(dsm_path, dtm_path, dest, driver, on_progress, is_canceled):
+def difference(dsm_path, dtm_path, dest, on_progress, is_canceled):
     """Write dsm minus dtm. Both rasters must share one grid, as clip()
     makes them when given the same bounds, resolution and CRS."""
-    dsm = gdal.Open(dsm_path)
+    dsm = _open(dsm_path)
     if dsm is None:
         raise RasterError('Cannot open {}'.format(dsm_path))
     vrt = (
@@ -142,15 +158,18 @@ def difference(dsm_path, dtm_path, dest, driver, on_progress, is_canceled):
     )
     dsm = None
     gdal.ErrorReset()
-    out = gdal.Translate(
-        dest,
-        gdal.Open(vrt),
-        options=gdal.TranslateOptions(
-            format=driver,
-            creationOptions=_options(driver),
-            callback=_callback(on_progress, is_canceled),
-        ),
-    )
+    try:
+        out = gdal.Translate(
+            dest,
+            gdal.Open(vrt),
+            options=gdal.TranslateOptions(
+                format='GTiff',
+                creationOptions=GTIFF_OPTIONS,
+                callback=_callback(on_progress, is_canceled),
+            ),
+        )
+    except RuntimeError as e:
+        _fail('Cannot compute the nDSM', is_canceled, e)
     if out is None:
         _fail('Cannot compute the nDSM', is_canceled)
     out = None
@@ -162,9 +181,17 @@ def _xml(text):
     )
 
 
+def _open(path, mode=gdal.GA_ReadOnly):
+    """The dataset, or None, whether or not GDAL exceptions are on."""
+    try:
+        return gdal.Open(path, mode)
+    except RuntimeError:
+        return None
+
+
 def tag(path, description):
     """Write the attribution into the file, so it travels with the data."""
-    ds = gdal.Open(path, gdal.GA_Update)
+    ds = _open(path, gdal.GA_Update)
     if ds is None:
         return
     ds.SetMetadata(TAGS)
@@ -174,7 +201,7 @@ def tag(path, description):
 
 def has_data(path):
     """Whether the raster has at least one pixel with a value."""
-    ds = gdal.Open(path)
+    ds = _open(path)
     if ds is None:
         return False
     gdal.PushErrorHandler('CPLQuietErrorHandler')
@@ -188,5 +215,5 @@ def has_data(path):
 
 
 def size(path):
-    ds = gdal.Open(path)
+    ds = _open(path)
     return (ds.RasterXSize, ds.RasterYSize) if ds is not None else (0, 0)
