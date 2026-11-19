@@ -42,6 +42,28 @@ def _callback(on_progress, is_canceled):
     return callback
 
 
+# Without these, GDAL lists the bucket folder before it opens each file,
+# which triples the time of a small clip.
+HTTP_OPTIONS = {
+    'GDAL_DISABLE_READDIR_ON_OPEN': 'EMPTY_DIR',
+    'GDAL_HTTP_MERGE_CONSECUTIVE_RANGES': 'YES',
+}
+
+
+def _set_http_options():
+    """Set HTTP_OPTIONS for this thread; return what to restore."""
+    previous = {}
+    for key, value in HTTP_OPTIONS.items():
+        previous[key] = gdal.GetThreadLocalConfigOption(key, None)
+        gdal.SetThreadLocalConfigOption(key, value)
+    return previous
+
+
+def _restore(previous):
+    for key, value in previous.items():
+        gdal.SetThreadLocalConfigOption(key, value)
+
+
 def _fail(what, is_canceled):
     if is_canceled():
         raise Canceled()
@@ -60,6 +82,7 @@ def clip(urls, dest, driver, dst_wkt, bounds, resolution, cutline_geojson,
     if cutline_geojson is not None:
         cutline = '/vsimem/gem15_cutline_{}.geojson'.format(uuid.uuid4().hex)
         gdal.FileFromMemBuffer(cutline, cutline_geojson.encode('utf-8'))
+    previous = _set_http_options()
     try:
         gdal.ErrorReset()
         out = gdal.Warp(
@@ -86,6 +109,7 @@ def clip(urls, dest, driver, dst_wkt, bounds, resolution, cutline_geojson,
             _fail('Cannot clip GEM-15', is_canceled)
         out = None
     finally:
+        _restore(previous)
         if cutline is not None:
             gdal.Unlink(cutline)
 
